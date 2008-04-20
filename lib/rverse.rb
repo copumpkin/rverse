@@ -22,6 +22,7 @@ macho = MachO.new(f)
 
 macho = macho.images[[:arm, :v6]]
 
+#pp macho.relocations
 #pp macho.symbols
 
 objc = ObjectiveC.new(macho)

@@ -239,6 +239,11 @@ class MachO
       
       info[:libraries] = []
       
+      info[:base_addr] = nil
+      
+      # MH_SPLIT_SEGS (TODO deal with x86_64)
+      need_writable = (macho_flags & 0x20) 
+      
       command_count.times do 
         command_header = content.read(8)
         command_type, command_size = command_header.unpack("#{int_format}*")
@@ -253,13 +258,17 @@ class MachO
           info[:libraries] << command[name_offset..-1].unpack("A*")[0]
         when :segment, :segment_64
           segment_name, vm_addr, vm_size, file_offset, file_size, max_prot, init_prot, section_count, segment_flags = command[8, 48].unpack("A16#{pointer_format * 4}#{int_format}*")
-                    
+          
           # Swap our pointers if necessary
           if info[:byte_order] != HOST_BYTE_ORDER && info[:image64]
             vm_addr     = [vm_addr].pack("Q").unpack("C*").inject([0, 56]){|accum, x| p accum; [accum[0] + x * (2 ** accum[1]), accum[1] - 8]}[0]
             vm_size     = [vm_size].pack("Q").unpack("C*").inject([0, 56]){|accum, x| p accum; [accum[0] + x * (2 ** accum[1]), accum[1] - 8]}[0]
             file_offset = [file_offset].pack("Q").unpack("C*").inject([0, 56]){|accum, x| p accum; [accum[0] + x * (2 ** accum[1]), accum[1] - 8]}[0]
             file_size   = [file_size].pack("Q").unpack("C*").inject([0, 56]){|accum, x| p accum; [accum[0] + x * (2 ** accum[1]), accum[1] - 8]}[0]
+          end
+          
+          if (!need_writable || (init_prot & 3 == 3))
+            info[:base_addr] ||= vm_addr
           end
           
           info[:segments][segment_name] = segment = {:vm_addr => vm_addr, :vm_size => vm_size, :file_offset => file_offset, :file_size => file_size, :max_prot => max_prot, :init_prot => init_prot, :flags => segment_flags}
@@ -377,16 +386,28 @@ class MachO
           local_relocation_table_offset,
           local_relocation_table_count = command[8, 88].unpack("#{int_format}*")
 
+          info[:relocations] = {}
+
           old_offset = content.tell
+
+          content.seek(info[:offset] + local_relocation_table_offset)
+          
+          local_relocation_table_count.times do
+            relocation_address, relocation_info = content.read(8).unpack("#{int_format}*")
+            
+            info[:relocations][info[:base_addr] + relocation_address] = @symbols[relocation_info & 0x00FFFFFF]
+            #p (relocation_info & 0x01000000) >> 24
+            #p (relocation_info & 0x06000000) >> 25
+            #p (relocation_info & 0x08000000) >> 27
+            #p (relocation_info & 0xF0000000) >> 28
+          end
           
           content.seek(info[:offset] + external_relocation_table_offset)
-          
-          info[:relocations] = {}
           
           external_relocation_table_count.times do
             relocation_address, relocation_info = content.read(8).unpack("#{int_format}*")
             
-            info[:relocations][relocation_address] = @symbols[relocation_info & 0x00FFFFFF]
+            info[:relocations][info[:base_addr] + relocation_address] = @symbols[relocation_info & 0x00FFFFFF]
             #p (relocation_info & 0x01000000) >> 24
             #p (relocation_info & 0x06000000) >> 25
             #p (relocation_info & 0x08000000) >> 27

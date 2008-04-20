@@ -68,7 +68,6 @@ class ObjectiveC
       virtual.seek(class_offset)
       metaclass_ptr, superclass_ptr, cache_ptr, vtable_ptr, info_ptr = virtual.read(20).unpack("V*")
       
-=begin      
       superclass_name = if object.relocations[class_offset + 4] =~ /^_OBJC_CLASS_\$_(.*)$/
         $1
       else
@@ -79,8 +78,6 @@ class ObjectiveC
         virtual.seek(superclass_name_ptr)
         virtual.gets("\x00").chop
       end
-=end
-      superclass_name = "NSPumpkin"
             
       virtual.seek(info_ptr)
       unk0, unk1, unk2, unk3, name_ptr, methodlist_ptr, unk4, ivarlist_ptr, unk5, propertylist_ptr = virtual.read(40).unpack("V*")
