@@ -15,7 +15,7 @@ class ObjectiveC
     '@' => 'id',
     '#' => 'class',
     ':' => 'SEL',
-    'c' => 'char',
+    'c' => 'BOOL', # this should be char, but objc.h typedefs BOOL to it, so 99% of char occurrences are actually BOOLs
     'C' => 'unsigned char',
     's' => 'short',
     'S' => 'unsigned short',
@@ -106,7 +106,7 @@ class ObjectiveC
           begin
             puts "\t#{ObjectiveC.merge_typenames(ivar_name, ivar_type)}; // #{ivar_type}"
           rescue
-            puts "// TO BE FIXED (unrecognized member variable)"
+            puts "// TO BE FIXED (unrecognized member variable #{ivar_name}) (#{ivar_type})"
           end
         end
       end
@@ -137,7 +137,7 @@ class ObjectiveC
             begin
               puts "+ #{ObjectiveC.merge_typenames(method_name, method_type)}; // #{method_type}"
             rescue
-              puts "// TO BE FIXED (unrecognized class method)"
+              puts "// TO BE FIXED (unrecognized class method #{method_name}) (#{method_type})"
             end
           end
           puts
@@ -162,7 +162,7 @@ class ObjectiveC
           begin
             puts "- #{ObjectiveC.merge_typenames(method_name, method_type)}; // #{method_type}"
           rescue
-            puts "// TO BE FIXED (unrecognized instance method)"
+            puts "// TO BE FIXED (unrecognized instance method #{method_name}) (#{method_type})"
           end
         end
       end

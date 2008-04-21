@@ -5,6 +5,9 @@ A set of libraries and utilities to facilitate reverse engineering
 ### TODOs
 
 * TEST TEST TEST (with rspec, ideally)
+* Figure out the protocol info for objc classes
+# Fix the ObjC module to not assume little-endian byte ordering
+# Detect nonatomic properties
 * Decode the additional information in the dysymtab load command, to support other kinds of relocations and dynamic linker behavior
 * Let the ObjC type descriptor parser understand ObjC++
 * Have the ObjC module detect ObjC1/1.5/2 and search for structures accordingly
@@ -22,4 +25,4 @@ A set of libraries and utilities to facilitate reverse engineering
 
 ### How to use
 
-For now, just run rverse.rb with the Objective C 2.0 binary you'd like to dump as its parameter. It will output the header contents to stdout (if you're lucky).
+For now, just run rverse.rb with the Objective C 2.0 binary you'd like to dump as its parameter. It will output the header contents to stdout (if you're lucky). If you specify a second parameter, it will redirect stdout to the file specified by that parameter.

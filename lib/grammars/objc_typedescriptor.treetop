@@ -28,7 +28,7 @@ grammar ObjectiveCTypeDescriptor
   end
   
   rule type_name
-    (name ("<" name ">")?) / (name? ("<" name ">"))
+    (name ("<" type_name ("," type_name)* ">")?) / (name? ("<" type_name ("," type_name)* ">"))
   end
   
   rule number
