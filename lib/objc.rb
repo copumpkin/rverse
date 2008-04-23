@@ -80,10 +80,39 @@ class ObjectiveC
       end
             
       virtual.seek(info_ptr)
-      unk0, unk1, unk2, unk3, name_ptr, methodlist_ptr, unk4, ivarlist_ptr, unk5, propertylist_ptr = virtual.read(40).unpack("V*")
+      unk0, unk1, unk2, unk3, name_ptr, methodlist_ptr, protocollist_ptr, ivarlist_ptr, unk5, propertylist_ptr = virtual.read(40).unpack("V*")
       
       virtual.seek(name_ptr)
-      puts "@interface #{virtual.gets("\x00").chop} : #{superclass_name}\n{"
+      name = virtual.gets("\x00").chop
+      
+      protocol_names = []
+      
+      protocol_list = if protocollist_ptr != 0
+        virtual.seek(protocollist_ptr)
+        protocol_count = virtual.read(4).unpack("V*")[0]
+        
+        p protocol_count
+        
+        protocol_count.times do 
+          protocol_ptr = virtual.read(4).unpack("V*")[0]
+                    
+          old_offset = virtual.tell
+          
+          virtual.seek(protocol_ptr + 4)
+          protocolname_ptr = virtual.read(4).unpack("V*")[0]
+          
+          virtual.seek(protocolname_ptr)
+          protocol_names << virtual.gets("\x00").chop
+          
+          virtual.seek(old_offset)
+        end
+        
+        "<#{protocol_names.join(", ")}>"
+      else
+        ""
+      end
+            
+      puts "@interface #{name} : #{superclass_name} #{protocol_list}\n{"
       
       if ivarlist_ptr != 0
         virtual.seek(ivarlist_ptr)
@@ -191,7 +220,7 @@ class ObjectiveC
             modifiers = ""
           end
           
-          puts "@property#{modifiers} #{ObjectiveC.merge_typenames(property_name, property_info[0][1..-1])};"
+          puts "@property#{modifiers} #{ObjectiveC.merge_typenames(property_name, property_info[0][1..-1])}; // #{property_type}"
         end
         puts
       end

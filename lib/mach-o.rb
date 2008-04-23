@@ -429,11 +429,11 @@ class MachO
   class Image
     class VirtualIO
       def initialize(source, segments)
-        @position, @source, @segments = 0, source.dup, segments
+        @source, @segments = source.dup, segments
       end
       
       def tell
-        @position
+        (@source.tell - @current[:file_offset]) + @current[:vm_addr]
       end
       
       # Replace with a precomputed interval tree, maybe, or maybe a caching mechanism? or at least check how much time this is taking
@@ -441,7 +441,9 @@ class MachO
         @segments.each_value do |info|
           if offset >= info[:vm_addr] && offset < info[:vm_addr] + info[:vm_size]
             read_offset = info[:file_offset] + (offset - info[:vm_addr])
-
+            
+            @current = info
+            
             @source.seek(read_offset)
             
             return
