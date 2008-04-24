@@ -24,7 +24,7 @@ A set of libraries and utilities to facilitate reverse engineering
 * Dump c++ binaries. This is facilitated by the fact that the symbols describe the argument types (see c++filt) and the classes have a degree of introspective ability.
 * Allow users to pass in "sample" programs that call the functions and use the classes in the specified binary, to improve dumping. In c binaries (defined as a binary that has no ObjC or C++ info in it), this would allow detection of whether a function returns a value or not.
 * Allow listing "intelligent cross-references", that not only tell you where a given function is called, but also, through register and memory tracing, any closed-form expressions possible to infer for its arguments.
-
+* Rule the world
 ### Dependencies
 
 * Treetop
