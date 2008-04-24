@@ -212,10 +212,17 @@ class ObjectiveC
           
           property_info = property_type.split(',')
           
-          if property_info.size > 2
-            modifiers = "(#{PROPERTY_MODIFIERS[property_info[1]]})"
-          else
-            modifiers = ""
+          modifiers = begin
+            if property_info.last[0] == ?V
+              property_name = property_info.last[1..-1]
+              property_info.pop
+            end
+          
+            if property_info.size > 1
+              "(#{property_info[1..-1].map{|x| PROPERTY_MODIFIERS[x]}.join(", ")})"
+            else
+              ""
+            end
           end
           
           puts "@property#{modifiers} #{ObjectiveC.merge_typenames(property_name, property_info[0][1..-1])}; // #{property_type}"
