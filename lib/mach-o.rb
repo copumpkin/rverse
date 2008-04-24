@@ -454,7 +454,7 @@ class MachO
       end
       
       def tell
-        (@source.tell - @current[:file_offset]) + @current[:vm_addr]
+        @source.tell - @current[:file_offset] + @current[:vm_addr]
       end
       
       # Replace with a precomputed interval tree, maybe, or maybe a caching mechanism? or at least check how much time this is taking
