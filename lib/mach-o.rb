@@ -240,10 +240,7 @@ class MachO
       info[:libraries] = []
       
       info[:base_addr] = nil
-      
-      # MH_SPLIT_SEGS (TODO deal with x86_64)
-      need_writable = (macho_flags & 0x20) 
-      
+            
       command_count.times do 
         command_header = content.read(8)
         command_type, command_size = command_header.unpack("#{int_format}*")
@@ -267,7 +264,8 @@ class MachO
             file_size   = [file_size].pack("Q").unpack("C*").inject([0, 56]){|accum, x| p accum; [accum[0] + x * (2 ** accum[1]), accum[1] - 8]}[0]
           end
           
-          if (!need_writable || (init_prot & 3 == 3))
+          # MH_SPLIT_SEGS (TODO deal with x86_64)
+          if (!((macho_flags & 0x20) != 0) || (init_prot & 3 == 3))
             info[:base_addr] ||= vm_addr
           end
           
@@ -391,7 +389,7 @@ class MachO
           old_offset = content.tell
 
           content.seek(info[:offset] + local_relocation_table_offset)
-          
+
           local_relocation_table_count.times do
             relocation_address, relocation_info = content.read(8).unpack("#{int_format}*")
             

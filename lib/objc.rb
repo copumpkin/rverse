@@ -74,7 +74,7 @@ class ObjectiveC
         virtual.seek(superclass_ptr + 16)
         virtual.seek(virtual.read(4).unpack("V*")[0] + 16)
         superclass_name_ptr = virtual.read(4).unpack("V*")[0]
-
+        
         virtual.seek(superclass_name_ptr)
         virtual.gets("\x00").chop
       end
@@ -90,9 +90,7 @@ class ObjectiveC
       protocol_list = if protocollist_ptr != 0
         virtual.seek(protocollist_ptr)
         protocol_count = virtual.read(4).unpack("V*")[0]
-        
-        p protocol_count
-        
+                
         protocol_count.times do 
           protocol_ptr = virtual.read(4).unpack("V*")[0]
                     
