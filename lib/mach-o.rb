@@ -1,7 +1,6 @@
-class MachO
-  HOST_BYTE_ORDER = ("\x01\x02\x03\x04".unpack("N")[0] == 0x01020304) ? :little : :big
-  NOT_HOST_BYTE_ORDER = ([:big, :little] - [HOST_BYTE_ORDER])[0]
-  
+require 'stringio'
+
+module MachOConstants
   CPU_TYPES = {
     1 => :vax, 
     6 => :mc680x0, 
@@ -162,84 +161,112 @@ class MachO
     12  => :prebound,
     10  => :indirect
   }
+end
+
+class MachO
+  include MachOConstants
   
-  attr_reader :source
+  # TODO: move me elsewhere
+  HOST_BYTE_ORDER = ("\x01\x02\x03\x04".unpack("N")[0] == 0x01020304) ? :little : :big
+  NOT_HOST_BYTE_ORDER = ([:big, :little] - [HOST_BYTE_ORDER])[0]
+  
   attr_reader :images
   
-  def initialize(content)
-    file_magic = content.read(4).unpack("N")[0]
-    
-    @source = content
-    architectures = {}
+  def initialize(source)
+    @source = source.kind_of?(String) ? StringIO.new(source) : source
 
     @images = {}
 
-    @symbols = []
+    load_images
+    decode_images
+  end
+  
+  private
+  
+  def create_image(variables)
+    image = Image.allocate
+    
+    variables.each do |name, value|
+      image.instance_variable_set("@#{name}", value)
+    end
+    
+    image
+  end
+  
+  def update_image(image, variables)
+    variables.each do |name, value|
+      image.instance_variable_set("@#{name}", value)
+    end
+    
+    image
+  end
+  
+  def load_images
+    file_magic = @source.read(4).unpack("N")[0]
 
     # Check to see if we have a fat binary
     if file_magic == 0xcafebabe || file_magic == 0xbebafeca
       # We have a fat binary, next int is the number of architectures
-      arch_count = content.read(4).unpack("N")[0]
+      arch_count = @source.read(4).unpack("N")[0]
       
       # Followed by arch_count contiguous architecture descriptors
       arch_count.times do 
-        cpu_type, cpu_subtype, offset, size, align = content.read(20).unpack("N*")
+        cpu_type, cpu_subtype, offset, size, align = @source.read(20).unpack("N*")
         
         cpu_type = CPU_TYPES[cpu_type]
         cpu_subtype = CPU_SUBTYPES[cpu_type][cpu_subtype]
         align = 2 ** align # unused
         
-        old_offset = content.tell
+        # (TODO: implement IO.push/pop, maybe)
+        old_offset = @source.tell
         
-        # Find out the byte ordering on this arch
-        content.seek(offset, IO::SEEK_SET)
-        arch_magic = content.read(4).unpack("V")[0]
+        # Find out the byte ordering on this arch 
+        @source.seek(offset)
+        arch_magic = @source.read(4).unpack("V")[0]
         
-        big_header = (arch_magic == 0xfeedfacf || arch_magic == 0xcffaedfe)
+        image64 = (arch_magic == 0xfeedfacf || arch_magic == 0xcffaedfe)
         byte_order = (arch_magic == 0xfeedface || arch_magic == 0xfeedfacf) ? HOST_BYTE_ORDER : NOT_HOST_BYTE_ORDER
         
         # Go back to where we were
-        content.seek(old_offset, IO::SEEK_SET)
+        @source.seek(old_offset)
         
-        architectures[[cpu_type, cpu_subtype]] = {:offset => offset, :size => size, :byte_order => byte_order, :image64 => big_header}
+        @images[[cpu_type, cpu_subtype]] = create_image(:offset => offset, :size => size, :byte_order => byte_order, :image64 => image64, :source => @source)
       end
     elsif file_magic = 0xfeedface || file_magic == 0xcefadefe || file_magic == 0xfeedfacf || file_magic == 0xcffaedfe
       # We have a normal binary, check the size of its header
-      big_header = (file_magic == 0xfeedfacf || file_magic == 0xcffaedfe)
+      image64 = (file_magic == 0xfeedfacf || file_magic == 0xcffaedfe)
       byte_order = (file_magic == 0xfeedface || file_magic == 0xfeedfacf) ? HOST_BYTE_ORDER : NOT_HOST_BYTE_ORDER
       
-      cpu_type, cpu_subtype = content.read(8).unpack("#{byte_order == :big ? 'N' : 'V'}*")
+      cpu_type, cpu_subtype = @source.read(8).unpack("#{byte_order == :big ? 'N' : 'V'}*")
       
       cpu_type = CPU_TYPES[cpu_type]
       cpu_subtype = CPU_SUBTYPES[cpu_type][cpu_subtype]
 
-      architectures[[cpu_type, cpu_subtype]] = {:offset => 0, :size => content.stat.size, :byte_order => byte_order, :image64 => big_header}
+      @images[[cpu_type, cpu_subtype]] = create_image(:offset => 0, :size => @source.stat.size, :byte_order => byte_order, :image64 => image64, :source => @source)
     else
       raise "Not a Mach-O binary"
     end
+  end
     
-    architectures.each do |architecture, info|
-      # p architecture
-      content.seek(info[:offset], IO::SEEK_SET)
+  def decode_images
+    @images.each do |architecture, image|
+      # Get an IO object that points at our image
+      content = image.physical
 
-      short_format = info[:byte_order] == :big ? "n" : "v"
-      int_format = info[:byte_order] == :big ? "N" : "V"
+      short_format = image.byte_order == :big ? "n" : "v"
+      int_format = image.byte_order == :big ? "N" : "V"
       
       # Ruby doesn't provide endianness control for 64-bit ints, so we'll need to swap them later if necessary
-      pointer_format = info[:image64] ? "Q" : int_format
+      pointer_format = image.image64 ? "Q" : int_format
       
-      header_size = info[:image64] ? 32 : 28
+      header_size = image.image64 ? 32 : 28
       
       file_type, command_count, commands_size, macho_flags = content.read(header_size).unpack("x12#{int_format}*")
-      
-      info[:segments] = {}
-      info[:sections] = []
-      
-      info[:symbols] = {}
-      
-      info[:libraries] = []
-      
-      info[:base_addr] = nil
+            
+      update_image(image, {:segments => {}, :sections => [], :symbols => {}, :libraries => []})
+            
+      # Local variable to maintain symbol ordering
+      symbols = []      
             
       command_count.times do 
         command_header = content.read(8)
@@ -252,12 +279,12 @@ class MachO
           uuid = command[8, 16].unpack("C*")
         when :load_dylib, :load_weak_dylib, :id_dylib
           name_offset, timestamp, current_version, compatibility_version = command[8, 16].unpack("#{int_format}*")
-          info[:libraries] << command[name_offset..-1].unpack("A*")[0]
+          image.libraries << command[name_offset..-1].unpack("A*")[0]
         when :segment, :segment_64
           segment_name, vm_addr, vm_size, file_offset, file_size, max_prot, init_prot, section_count, segment_flags = command[8, 48].unpack("A16#{pointer_format * 4}#{int_format}*")
           
           # Swap our pointers if necessary
-          if info[:byte_order] != HOST_BYTE_ORDER && info[:image64]
+          if image.byte_order != HOST_BYTE_ORDER && image.image64
             vm_addr     = [vm_addr].pack("Q").unpack("C*").inject([0, 56]){|accum, x| p accum; [accum[0] + x * (2 ** accum[1]), accum[1] - 8]}[0]
             vm_size     = [vm_size].pack("Q").unpack("C*").inject([0, 56]){|accum, x| p accum; [accum[0] + x * (2 ** accum[1]), accum[1] - 8]}[0]
             file_offset = [file_offset].pack("Q").unpack("C*").inject([0, 56]){|accum, x| p accum; [accum[0] + x * (2 ** accum[1]), accum[1] - 8]}[0]
@@ -266,12 +293,12 @@ class MachO
           
           # MH_SPLIT_SEGS (TODO deal with x86_64)
           if (!((macho_flags & 0x20) != 0) || (init_prot & 3 == 3))
-            info[:base_addr] ||= vm_addr
+            update_image(image, {:base_address => vm_addr}) unless image.base_address
           end
           
-          info[:segments][segment_name] = segment = {:vm_addr => vm_addr, :vm_size => vm_size, :file_offset => file_offset, :file_size => file_size, :max_prot => max_prot, :init_prot => init_prot, :flags => segment_flags}
+          image.segments[segment_name] = segment = {:vm_addr => vm_addr, :vm_size => vm_size, :file_offset => file_offset, :file_size => file_size, :max_prot => max_prot, :init_prot => init_prot, :flags => segment_flags}
           
-          section_size = info[:image64] ? 76 : 68
+          section_size = image.image64 ? 76 : 68
           
           segment[:sections] = {}
           
@@ -281,7 +308,7 @@ class MachO
             section_name, section_segment_name, addr, size, offset, align, relocation_offset, relocation_count, section_flags = section_body.unpack("A16A16#{pointer_format * 4}#{int_format}*")
             
             # Fix our pointer info
-            if info[:byte_order] != HOST_BYTE_ORDER && info[:image64]
+            if image.byte_order != HOST_BYTE_ORDER && image.image64
               addr = [addr].pack("Q").unpack("C*").inject([0, 56]){|accum, x| p accum; [accum[0] + x * (2 ** accum[1]), accum[1] - 8]}[0]
               size = [size].pack("Q").unpack("C*").inject([0, 56]){|accum, x| p accum; [accum[0] + x * (2 ** accum[1]), accum[1] - 8]}[0]
             end
@@ -289,67 +316,67 @@ class MachO
             segment[:sections][section_name] = section = {:addr => addr, :size => size, :offset => offset, :align => align, :relocation_offset => relocation_offset, :relocation_count => relocation_count, :flags => section_flags}
             
             # Maintain an ordered list of the sections
-            info[:sections] << section
+            image.sections << section
           end
         when :code_signature
           data_offset, data_size = command[8, 8].unpack("#{int_format}*")
           
           old_offset = content.tell
-          content.seek(info[:offset] + data_offset, IO::SEEK_SET)
+          content.seek(data_offset)
           
           #info[:signature_data] = content.read(data_size)
           
-          content.seek(old_offset, IO::SEEK_SET)
+          content.seek(old_offset)
         when :symtab, :symtab_64
           symbols_offset, symbol_count, strings_offset, strings_size = command[8, 32].unpack("#{int_format}*")
           
           old_offset = content.tell
           
-          symbol_size = info[:image64] ? 16 : 12
+          symbol_size = image.image64 ? 16 : 12
           
           symbol_count.times do |i|
-            content.seek(info[:offset] + symbols_offset + symbol_size * i, IO::SEEK_SET)
+            content.seek(symbols_offset + symbol_size * i)
             
             un, type, section, desc, value = content.read(symbol_size).unpack("#{int_format}C2#{short_format}#{pointer_format}")
             
-            if info[:byte_order] != HOST_BYTE_ORDER && info[:image64]
+            if image.byte_order != HOST_BYTE_ORDER && image.image64
               value = [value].pack("Q").unpack("C*").inject([0, 56]){|accum, x| p accum; [accum[0] + x * (2 ** accum[1]), accum[1] - 8]}[0]
             end
             
             symbol_type = type & 0x0e
             external = (type & 1) != 0
           
-            content.seek(info[:offset] + strings_offset + un)
+            content.seek(strings_offset + un)
             
             symbol = content.gets("\x00")[0..-2]
             
-            info[:symbols][symbol] = {:section => section, :desc => desc, :value => value, :external => external}
+            image.symbols[symbol] = {:section => section, :desc => desc, :value => value, :external => external}
             
-            @symbols << symbol
+            symbols << symbol
             
             if symbol_type == 0
-              info[:symbols][symbol][:lazy] = (desc & 1) != 0
+              image.symbols[symbol][:lazy] = (desc & 1) != 0
             else
-              if (info[:symbols][symbol][:defined] = (desc & 2) != 0)
-                info[:symbols][symbol][:private] = (desc & 1) != 0
+              if (image.symbols[symbol][:defined] = (desc & 2) != 0)
+                image.symbols[symbol][:private] = (desc & 1) != 0
               end
             end
             
             if (desc & 4) != 0
-              info[:symbols][symbol][:defined] = false
-              info[:symbols][symbol][:lazy] = false
+              image.symbols[symbol][:defined] = false
+              image.symbols[symbol][:lazy] = false
             end
             
             if (desc & 0x10) != 0
-              info[:symbols][symbol][:referenced_dynamically] = true
+              image.symbols[symbol][:referenced_dynamically] = true
             end
             
             if (desc & 0x40) != 0
-              info[:symbols][symbol][:weak_reference] = true
+              image.symbols[symbol][:weak_reference] = true
             end
             
             if (desc & 0x80) != 0
-              info[:symbols][symbol][:weak_definition] = true
+              image.symbols[symbol][:weak_definition] = true
             end
             
             # Check if MH_TWOLEVEL is set
@@ -357,12 +384,12 @@ class MachO
               library_index = ((desc & 0xFF00) >> 8) - 1
               
               if library_index != -1
-                info[:symbols][symbol][:library_index] = library_index
+                image.symbols[symbol][:library_index] = library_index
               end
             end
           end
           
-          content.seek(old_offset, IO::SEEK_SET)
+          content.seek(old_offset)
           
         when :dysymtab
           first_local_symbol_index,
@@ -384,28 +411,28 @@ class MachO
           local_relocation_table_offset,
           local_relocation_table_count = command[8, 88].unpack("#{int_format}*")
 
-          info[:relocations] = {}
+          update_image(image, {:relocations => {}})
 
           old_offset = content.tell
 
-          content.seek(info[:offset] + local_relocation_table_offset)
+          content.seek(local_relocation_table_offset)
 
           local_relocation_table_count.times do
             relocation_address, relocation_info = content.read(8).unpack("#{int_format}*")
             
-            info[:relocations][info[:base_addr] + relocation_address] = @symbols[relocation_info & 0x00FFFFFF]
+            image.relocations[image.base_address + relocation_address] = symbols[relocation_info & 0x00FFFFFF]
             #p (relocation_info & 0x01000000) >> 24
             #p (relocation_info & 0x06000000) >> 25
             #p (relocation_info & 0x08000000) >> 27
             #p (relocation_info & 0xF0000000) >> 28
           end
           
-          content.seek(info[:offset] + external_relocation_table_offset)
+          content.seek(external_relocation_table_offset)
           
           external_relocation_table_count.times do
             relocation_address, relocation_info = content.read(8).unpack("#{int_format}*")
             
-            info[:relocations][info[:base_addr] + relocation_address] = @symbols[relocation_info & 0x00FFFFFF]
+            image.relocations[image.base_address + relocation_address] = symbols[relocation_info & 0x00FFFFFF]
             #p (relocation_info & 0x01000000) >> 24
             #p (relocation_info & 0x06000000) >> 25
             #p (relocation_info & 0x08000000) >> 27
@@ -416,10 +443,6 @@ class MachO
 
         end
       end
-    end
-
-    architectures.each_pair do |architecture, info|
-      @images[architecture] = Image.new(architecture, info, self)
     end
   end
   
@@ -463,6 +486,8 @@ class MachO
     class PhysicalIO
       def initialize(source, offset, size)
         @source, @offset, @size = source.dup, offset, size
+        
+        @source.seek(@offset)
       end
       
       def tell
@@ -487,28 +512,21 @@ class MachO
       end
     end
     
-    attr_reader :segments, :sections, :symbols, :size, :relocations
-    
-    def initialize(architecture, info, parent)
-      @parent = parent
-      @sections = info[:sections]
-      @symbols = info[:symbols]
-      @image64 = info[:image64]
-      @byte_order = info[:byte_order]
-      @offset = info[:offset]
-      @size = info[:size]
-      @segments = info[:segments]
-      @relocations = info[:relocations]
-    end
+    attr_reader :segments, :sections, :symbols, :size, :relocations, :base_address, :byte_order, :image64, :libraries
     
     # Returns an IO object that operates on the loaded image's memory
     def virtual
-      VirtualIO.new(@parent.source, @segments)
+      VirtualIO.new(@source, @segments)
     end
     
     # Returns an IO object that operates on the file (or subset of it, if it's a fat binary) this image came from
     def physical
-      PhysicalIO.new(@parent.source, @offset, @size)
+      PhysicalIO.new(@source, @offset, @size)
+    end
+    
+    private
+    
+    def initialize
     end
   end
 end

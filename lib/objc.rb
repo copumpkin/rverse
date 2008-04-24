@@ -80,7 +80,7 @@ class ObjectiveC
       end
             
       virtual.seek(info_ptr)
-      unk0, unk1, unk2, unk3, name_ptr, methodlist_ptr, protocollist_ptr, ivarlist_ptr, unk5, propertylist_ptr = virtual.read(40).unpack("V*")
+      version, info, instance_size, unk3, name_ptr, methodlist_ptr, protocollist_ptr, ivarlist_ptr, unk5, propertylist_ptr = virtual.read(40).unpack("V*")
       
       virtual.seek(name_ptr)
       name = virtual.gets("\x00").chop
